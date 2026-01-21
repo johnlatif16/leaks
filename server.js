@@ -1,4 +1,3 @@
-// server.js (fixed)
 const express = require("express");
 const path = require("path");
 const fs = require("fs/promises");
@@ -9,12 +8,10 @@ const cookieParser = require("cookie-parser");
 const rateLimit = require("express-rate-limit");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcryptjs");
-const csurf = require("csurf");
 const multer = require("multer");
 const crypto = require("crypto");
 
 dotenv.config();
-
 const app = express();
 
 // ====== Config ======
@@ -30,14 +27,17 @@ const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD || "admin123").trim();
 
 const NEWS_PATH = path.join(__dirname, "data", "news.json");
 
+// Secure cookies لا تعمل على http
 const COOKIE_SECURE =
   (process.env.COOKIE_SECURE || "").toLowerCase() === "true" ? true : IS_PROD;
-const COOKIE_SAMESITE = "strict";
+
+// SameSite=Lax يقلل خطر CSRF شوية بدون csurf (مش حماية كاملة)
+const COOKIE_SAMESITE = "lax";
 
 // ====== Middleware ======
 app.use(helmet());
 app.use(morgan(IS_PROD ? "combined" : "dev"));
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "4mb" }));
 app.use(cookieParser());
 
 app.use(
@@ -49,16 +49,7 @@ app.use(
   })
 );
 
-// CSRF via cookie + header
-const csrfProtection = csurf({
-  cookie: {
-    httpOnly: true,
-    sameSite: COOKIE_SAMESITE,
-    secure: COOKIE_SECURE,
-  },
-});
-
-// ====== Uploads ======
+// ====== Uploads (multer) ======
 const upload = multer({
   storage: multer.diskStorage({
     destination: async (req, file, cb) => {
@@ -90,7 +81,7 @@ const upload = multer({
   },
 });
 
-// static for uploads
+// serve uploads
 app.use(
   "/uploads",
   express.static(path.join(__dirname, "uploads"), {
@@ -189,37 +180,36 @@ function sanitizeBlocks(blocks) {
     .filter(Boolean);
 }
 
-// ====== Pages (explicit routes) ======
+// ====== Pages ======
 app.get("/", (req, res) => {
   res.sendFile(path.join(__dirname, "public", "index.html"));
 });
 
-// لو حد كتب /login يوديه على login.html
 app.get("/login", (req, res) => {
   res.redirect("/login.html");
 });
 
-// حماية dashboard.html
+// Protect dashboard page
 app.get("/dashboard.html", requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "dashboard.html"));
 });
 
-// static public
+// public static
 app.use(express.static(path.join(__dirname, "public")));
 
 // ====== API ======
-app.get("/api/csrf", csrfProtection, (req, res) => {
-  res.json({ csrfToken: req.csrfToken() });
-});
 
+// Public news
 app.get("/api/news", async (req, res) => {
   const items = sortNewsNewestFirst(await readNews());
   res.json({ items });
 });
 
+// Password hash at startup
 const ADMIN_PASSWORD_HASH = bcrypt.hashSync(ADMIN_PASSWORD, 12);
 
-app.post("/api/login", csrfProtection, async (req, res) => {
+// Login (NO CSRF)
+app.post("/api/login", async (req, res) => {
   const { username, password } = req.body || {};
   if (typeof username !== "string" || typeof password !== "string") {
     return res.status(400).json({ error: "Invalid payload" });
@@ -238,43 +228,42 @@ app.post("/api/login", csrfProtection, async (req, res) => {
     httpOnly: true,
     secure: COOKIE_SECURE,
     sameSite: COOKIE_SAMESITE,
-    maxAge: 2 * 60 * 60 * 1000,
+    maxAge: 2 * 60 * 60 * 1000, // 2h
   });
 
   res.json({ ok: true });
 });
 
-app.post("/api/logout", requireAuth, csrfProtection, (req, res) => {
+// Logout (NO CSRF)
+app.post("/api/logout", requireAuth, (req, res) => {
   res.clearCookie("token");
   res.json({ ok: true });
 });
 
+// Admin me
 app.get("/api/admin/me", requireAuth, (req, res) => {
   res.json({ user: { username: req.user.sub, role: req.user.role } });
 });
 
-app.post(
-  "/api/admin/upload",
-  requireAuth,
-  csrfProtection,
-  upload.single("file"),
-  (req, res) => {
-    if (!req.file) return res.status(400).json({ error: "No file uploaded" });
-    res.json({
-      ok: true,
-      url: `/uploads/${req.file.filename}`,
-      mime: req.file.mimetype,
-      size: req.file.size,
-    });
-  }
-);
+// Upload (NO CSRF)
+app.post("/api/admin/upload", requireAuth, upload.single("file"), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: "No file uploaded" });
+  res.json({
+    ok: true,
+    url: `/uploads/${req.file.filename}`,
+    mime: req.file.mimetype,
+    size: req.file.size,
+  });
+});
 
+// Admin list news
 app.get("/api/admin/news", requireAuth, async (req, res) => {
   const items = sortNewsNewestFirst(await readNews());
   res.json({ items });
 });
 
-app.post("/api/admin/news", requireAuth, csrfProtection, async (req, res) => {
+// Admin create news (NO CSRF)
+app.post("/api/admin/news", requireAuth, async (req, res) => {
   const { title, blocks } = req.body || {};
   if (typeof title !== "string" || title.trim().length < 2) {
     return res.status(400).json({ error: "Title is required" });
@@ -293,10 +282,12 @@ app.post("/api/admin/news", requireAuth, csrfProtection, async (req, res) => {
   };
   items.push(item);
   await writeNews(items);
+
   res.json({ ok: true, item });
 });
 
-app.delete("/api/admin/news/:id", requireAuth, csrfProtection, async (req, res) => {
+// Admin delete news (NO CSRF)
+app.delete("/api/admin/news/:id", requireAuth, async (req, res) => {
   const id = req.params.id;
   const items = await readNews();
   const next = items.filter((x) => x.id !== id);
@@ -305,11 +296,8 @@ app.delete("/api/admin/news/:id", requireAuth, csrfProtection, async (req, res) 
   res.json({ ok: true });
 });
 
-// ====== Errors ======
+// Errors
 app.use((err, req, res, next) => {
-  if (err && err.code === "EBADCSRFTOKEN") {
-    return res.status(403).json({ error: "Bad CSRF token" });
-  }
   if (err && err.message === "Unsupported file type") {
     return res.status(400).json({ error: "Unsupported file type" });
   }
