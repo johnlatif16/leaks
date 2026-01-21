@@ -3,51 +3,179 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>موقع الأخبار</title>
+  <title>الأخبار</title>
   <style>
-    body { font-family: system-ui, Arial; margin: 24px; }
-    header { display:flex; justify-content:space-between; align-items:center; gap:12px; }
-    .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; margin: 12px 0; }
-    .meta { color:#666; font-size: 13px; }
-    a { text-decoration:none; }
+    :root{
+      --bg:#0b1220;
+      --card:#111a2e;
+      --text:#e8eefc;
+      --muted:#a9b6d6;
+      --line:rgba(255,255,255,.08);
+      --radius:18px;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0; font-family: system-ui, -apple-system, Segoe UI, Arial;
+      background: radial-gradient(1200px 600px at 80% -10%, rgba(99,102,241,.22), transparent 60%),
+                  radial-gradient(900px 450px at 10% 0%, rgba(34,197,94,.14), transparent 55%),
+                  var(--bg);
+      color:var(--text);
+    }
+    .container{max-width:1100px; margin:0 auto; padding:28px 18px 40px;}
+    .topbar{
+      display:flex; gap:14px; align-items:center; justify-content:space-between;
+      padding:14px 16px; border:1px solid var(--line); border-radius:var(--radius);
+      background: rgba(17,26,46,.72); backdrop-filter: blur(10px);
+      position: sticky; top: 14px;
+    }
+    .brand{display:flex; align-items:center; gap:10px}
+    .dot{width:10px; height:10px; border-radius:99px; background:#22c55e; box-shadow:0 0 0 6px rgba(34,197,94,.12)}
+    .title{margin:0; font-size:18px}
+    .sub{margin:0; color:var(--muted); font-size:13px}
+    .grid{
+      margin-top:18px;
+      display:grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap:14px;
+    }
+    .card{
+      grid-column: span 6;
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      background: rgba(17,26,46,.66);
+      overflow:hidden;
+    }
+    @media (max-width: 900px){ .card{grid-column: span 12;} }
+    .card .head{padding:14px 16px; border-bottom:1px solid var(--line)}
+    .card h3{margin:0; font-size:17px; line-height:1.3}
+    .meta{margin-top:6px; color:var(--muted); font-size:12px}
+    .content{padding:14px 16px; line-height:1.8; color:#dce6ff}
+    .media{width:100%; display:block; background:#0b1220}
+    .tableWrap{overflow:auto; border:1px solid var(--line); border-radius:14px}
+    table{width:100%; border-collapse:collapse; min-width:520px}
+    th,td{padding:10px 12px; border-bottom:1px solid var(--line); text-align:right}
+    th{color:#cfe0ff; font-weight:700; background:rgba(255,255,255,.04)}
+    .empty{margin-top:22px; padding:18px; border:1px dashed var(--line); border-radius:var(--radius); color:var(--muted)}
   </style>
 </head>
 <body>
-  <header>
-    <h1>الأخبار</h1>
-    <nav>
-      <a href="/login.html">تسجيل دخول الأدمن</a>
-    </nav>
-  </header>
+  <div class="container">
+    <div class="topbar">
+      <div class="brand">
+        <div class="dot"></div>
+        <div>
+          <p class="title">آخر الأخبار</p>
+          <p class="sub">تحديثات يومية في مكان واحد</p>
+        </div>
+      </div>
+      <!-- مفيش أي لينك أدمن هنا -->
+    </div>
 
-  <div id="list"></div>
+    <div id="grid" class="grid"></div>
+    <div id="empty" class="empty" style="display:none">لا توجد أخبار بعد.</div>
+  </div>
 
   <script>
-    async function loadNews() {
+    async function loadNews(){
       const res = await fetch("/api/news");
       const data = await res.json();
-      const list = document.getElementById("list");
-      list.innerHTML = "";
+      const grid = document.getElementById("grid");
+      const empty = document.getElementById("empty");
 
-      if (!data.items || data.items.length === 0) {
-        list.innerHTML = "<p>لا توجد أخبار بعد.</p>";
-        return;
-      }
+      grid.innerHTML = "";
+      const items = data.items || [];
+      empty.style.display = items.length ? "none" : "block";
 
-      for (const item of data.items) {
-        const el = document.createElement("div");
-        el.className = "card";
-        el.innerHTML = `
-          <h3>${escapeHtml(item.title)}</h3>
-          <p class="meta">${new Date(item.createdAt).toLocaleString("ar-EG")}</p>
-          <p>${escapeHtml(item.body).replaceAll("\n","<br>")}</p>
+      for(const item of items){
+        const card = document.createElement("article");
+        card.className = "card";
+        card.innerHTML = `
+          <div class="head">
+            <h3>${escapeHtml(item.title)}</h3>
+            <div class="meta">${new Date(item.createdAt).toLocaleString("ar-EG")}</div>
+          </div>
+          <div class="content" id="c_${item.id}"></div>
         `;
-        list.appendChild(el);
+        grid.appendChild(card);
+
+        const content = card.querySelector(`#c_${item.id}`);
+        renderBlocks(content, item.blocks || [{type:"paragraph", text:item.body || ""}]);
       }
     }
 
-    function escapeHtml(s) {
-      return String(s).replace(/[&<>"']/g, (c) => ({
+    function renderBlocks(container, blocks){
+      for(const b of blocks){
+        if(b.type === "paragraph"){
+          const p = document.createElement("div");
+          p.innerHTML = escapeHtml(b.text || "").replaceAll("\n","<br>");
+          container.appendChild(p);
+        } else if(b.type === "image"){
+          const img = document.createElement("img");
+          img.className = "media";
+          img.alt = b.alt || "";
+          img.src = b.url;
+          container.appendChild(img);
+        } else if(b.type === "video"){
+          if((b.url||"").includes("youtube.com") || (b.url||"").includes("youtu.be")){
+            const iframe = document.createElement("iframe");
+            iframe.width = "100%";
+            iframe.height = "360";
+            iframe.style.border = "0";
+            iframe.allow = "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture";
+            iframe.allowFullscreen = true;
+            iframe.src = toYoutubeEmbed(b.url);
+            container.appendChild(iframe);
+          }else{
+            const v = document.createElement("video");
+            v.className="media";
+            v.controls = true;
+            v.src = b.url;
+            container.appendChild(v);
+          }
+        } else if(b.type === "table"){
+          const wrap = document.createElement("div");
+          wrap.className="tableWrap";
+          const t = document.createElement("table");
+          const thead = document.createElement("thead");
+          const trh = document.createElement("tr");
+          for(const h of (b.headers||[])){
+            const th = document.createElement("th");
+            th.textContent = h;
+            trh.appendChild(th);
+          }
+          thead.appendChild(trh);
+          t.appendChild(thead);
+
+          const tb = document.createElement("tbody");
+          for(const row of (b.rows||[])){
+            const tr = document.createElement("tr");
+            for(const cell of row){
+              const td = document.createElement("td");
+              td.textContent = cell;
+              tr.appendChild(td);
+            }
+            tb.appendChild(tr);
+          }
+          t.appendChild(tb);
+          wrap.appendChild(t);
+          container.appendChild(wrap);
+        }
+      }
+    }
+
+    function toYoutubeEmbed(url){
+      try{
+        const u = new URL(url);
+        if(u.hostname.includes("youtu.be")){
+          return `https://www.youtube.com/embed/${u.pathname.replace("/","")}`;
+        }
+        const id = u.searchParams.get("v");
+        return `https://www.youtube.com/embed/${id || ""}`;
+      }catch{ return url; }
+    }
+
+    function escapeHtml(s){
+      return String(s).replace(/[&<>"']/g, c => ({
         "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"
       }[c]));
     }
