@@ -1,4 +1,4 @@
-// server.js
+// server.js (fixed)
 const express = require("express");
 const path = require("path");
 const fs = require("fs/promises");
@@ -22,28 +22,21 @@ const PORT = Number(process.env.PORT || 3000);
 const NODE_ENV = process.env.NODE_ENV || "development";
 const IS_PROD = NODE_ENV === "production";
 
-const JWT_SECRET = process.env.JWT_SECRET || "dev_secret_change_me";
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "2h";
+const JWT_SECRET = (process.env.JWT_SECRET || "dev_secret_change_me").trim();
+const JWT_EXPIRES_IN = (process.env.JWT_EXPIRES_IN || "2h").trim();
 
-const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "admin123";
+const ADMIN_USERNAME = (process.env.ADMIN_USERNAME || "admin").trim();
+const ADMIN_PASSWORD = (process.env.ADMIN_PASSWORD || "admin123").trim();
 
-// ملف تخزين الأخبار
 const NEWS_PATH = path.join(__dirname, "data", "news.json");
 
-// Cookie options
 const COOKIE_SECURE =
   (process.env.COOKIE_SECURE || "").toLowerCase() === "true" ? true : IS_PROD;
-
-const COOKIE_SAMESITE = "strict"; // نفس الدومين (لو cross-site هتحتاج None + Secure)
-
-// اعمل hash مرة واحدة عند تشغيل السيرفر
-const ADMIN_PASSWORD_HASH = bcrypt.hashSync(ADMIN_PASSWORD, 12);
+const COOKIE_SAMESITE = "strict";
 
 // ====== Middleware ======
 app.use(helmet());
 app.use(morgan(IS_PROD ? "combined" : "dev"));
-
 app.use(express.json({ limit: "2mb" }));
 app.use(cookieParser());
 
@@ -56,7 +49,7 @@ app.use(
   })
 );
 
-// CSRF (token عبر cookie + header x-csrf-token)
+// CSRF via cookie + header
 const csrfProtection = csurf({
   cookie: {
     httpOnly: true,
@@ -65,7 +58,7 @@ const csrfProtection = csurf({
   },
 });
 
-// ====== Uploads (multer) ======
+// ====== Uploads ======
 const upload = multer({
   storage: multer.diskStorage({
     destination: async (req, file, cb) => {
@@ -79,9 +72,7 @@ const upload = multer({
     },
     filename: (req, file, cb) => {
       const ext = path.extname(file.originalname || "").toLowerCase();
-      const name =
-        `${Date.now()}_${crypto.randomBytes(6).toString("hex")}` + ext;
-      cb(null, name);
+      cb(null, `${Date.now()}_${crypto.randomBytes(6).toString("hex")}${ext}`);
     },
   }),
   limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
@@ -99,7 +90,7 @@ const upload = multer({
   },
 });
 
-// تقديم uploads كملفات static
+// static for uploads
 app.use(
   "/uploads",
   express.static(path.join(__dirname, "uploads"), {
@@ -147,19 +138,19 @@ function requireAuth(req, res, next) {
 }
 
 function randomId() {
-  // Node 18+ غالبًا فيه randomUUID
   if (crypto.randomUUID) return crypto.randomUUID();
   return "n_" + Math.random().toString(16).slice(2) + "_" + Date.now().toString(16);
 }
 
 function sortNewsNewestFirst(items) {
-  return items.sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+  return items.sort((a, b) =>
+    String(b.createdAt || "").localeCompare(String(a.createdAt || ""))
+  );
 }
 
-// فلترة blocks (تأمين / تقليل junk)
 function sanitizeBlocks(blocks) {
   if (!Array.isArray(blocks)) return [];
-  const safe = blocks
+  return blocks
     .slice(0, 50)
     .map((b) => {
       if (!b || typeof b !== "object") return null;
@@ -196,69 +187,72 @@ function sanitizeBlocks(blocks) {
       return null;
     })
     .filter(Boolean);
-
-  return safe;
 }
 
-// ====== Routes ======
+// ====== Pages (explicit routes) ======
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
 
-// حماية dashboard.html (مش هنسيبه للـ static)
+// لو حد كتب /login يوديه على login.html
+app.get("/login", (req, res) => {
+  res.redirect("/login.html");
+});
+
+// حماية dashboard.html
 app.get("/dashboard.html", requireAuth, (req, res) => {
   res.sendFile(path.join(__dirname, "public", "dashboard.html"));
 });
 
-// تقديم public static (index/login + assets)
+// static public
 app.use(express.static(path.join(__dirname, "public")));
 
-// CSRF token endpoint (للفرونت)
+// ====== API ======
 app.get("/api/csrf", csrfProtection, (req, res) => {
   res.json({ csrfToken: req.csrfToken() });
 });
 
-// Public: قراءة الأخبار
 app.get("/api/news", async (req, res) => {
   const items = sortNewsNewestFirst(await readNews());
   res.json({ items });
 });
 
-// Login (CSRF)
+const ADMIN_PASSWORD_HASH = bcrypt.hashSync(ADMIN_PASSWORD, 12);
+
 app.post("/api/login", csrfProtection, async (req, res) => {
   const { username, password } = req.body || {};
   if (typeof username !== "string" || typeof password !== "string") {
     return res.status(400).json({ error: "Invalid payload" });
   }
 
-  const okUser = username === ADMIN_USERNAME;
+  const okUser = username.trim() === ADMIN_USERNAME;
   const passOk = await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
 
   if (!okUser || !passOk) {
     return res.status(401).json({ error: "Invalid credentials" });
   }
 
-  const token = signJwt({ sub: username, role: "admin" });
+  const token = signJwt({ sub: ADMIN_USERNAME, role: "admin" });
 
   res.cookie("token", token, {
     httpOnly: true,
     secure: COOKIE_SECURE,
     sameSite: COOKIE_SAMESITE,
-    maxAge: 2 * 60 * 60 * 1000, // 2h
+    maxAge: 2 * 60 * 60 * 1000,
   });
 
   res.json({ ok: true });
 });
 
-// Logout (CSRF + Auth)
 app.post("/api/logout", requireAuth, csrfProtection, (req, res) => {
   res.clearCookie("token");
   res.json({ ok: true });
 });
 
-// Admin: من أنا
 app.get("/api/admin/me", requireAuth, (req, res) => {
   res.json({ user: { username: req.user.sub, role: req.user.role } });
 });
 
-// Admin: رفع ملفات (CSRF + Auth)
 app.post(
   "/api/admin/upload",
   requireAuth,
@@ -275,20 +269,16 @@ app.post(
   }
 );
 
-// Admin: قراءة الأخبار
 app.get("/api/admin/news", requireAuth, async (req, res) => {
   const items = sortNewsNewestFirst(await readNews());
   res.json({ items });
 });
 
-// Admin: إضافة خبر (Blocks)
 app.post("/api/admin/news", requireAuth, csrfProtection, async (req, res) => {
   const { title, blocks } = req.body || {};
-
   if (typeof title !== "string" || title.trim().length < 2) {
     return res.status(400).json({ error: "Title is required" });
   }
-
   const safeBlocks = sanitizeBlocks(blocks);
   if (safeBlocks.length === 0) {
     return res.status(400).json({ error: "Blocks are required" });
@@ -301,33 +291,21 @@ app.post("/api/admin/news", requireAuth, csrfProtection, async (req, res) => {
     blocks: safeBlocks,
     createdAt: new Date().toISOString(),
   };
-
   items.push(item);
   await writeNews(items);
-
   res.json({ ok: true, item });
 });
 
-// Admin: حذف خبر
 app.delete("/api/admin/news/:id", requireAuth, csrfProtection, async (req, res) => {
   const id = req.params.id;
   const items = await readNews();
   const next = items.filter((x) => x.id !== id);
-
-  if (next.length === items.length) {
-    return res.status(404).json({ error: "Not found" });
-  }
-
+  if (next.length === items.length) return res.status(404).json({ error: "Not found" });
   await writeNews(next);
   res.json({ ok: true });
 });
 
-// ====== 404 ======
-app.use((req, res) => {
-  res.status(404).send("Not Found");
-});
-
-// ====== Error handler (خصوصًا CSRF/multer) ======
+// ====== Errors ======
 app.use((err, req, res, next) => {
   if (err && err.code === "EBADCSRFTOKEN") {
     return res.status(403).json({ error: "Bad CSRF token" });
@@ -342,7 +320,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Server error" });
 });
 
-// ====== Start ======
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`COOKIE_SECURE=${COOKIE_SECURE} | NODE_ENV=${NODE_ENV}`);
 });
