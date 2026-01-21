@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>لوحة الأدمن</title>
+  <style>
+    body { font-family: system-ui, Arial; margin: 24px; max-width: 900px; }
+    header { display:flex; justify-content:space-between; align-items:center; gap: 12px; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; }
+    input, textarea { width: 100%; padding: 10px; margin-top: 6px; }
+    textarea { min-height: 140px; }
+    button { margin-top: 12px; padding: 10px 14px; cursor:pointer; }
+    .news-item { border-top: 1px solid #eee; padding-top: 10px; margin-top: 10px; }
+    .meta { color:#666; font-size: 13px; }
+    .danger { border: 1px solid #f2b8b5; }
+    .err { color:#b00020; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>لوحة الأدمن</h1>
+    <div>
+      <span id="who"></span>
+      <button id="logout" class="danger">تسجيل خروج</button>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <h3>إضافة خبر</h3>
+      <form id="addForm">
+        <label>العنوان
+          <input name="title" required />
+        </label>
+        <label>المحتوى
+          <textarea name="body" required></textarea>
+        </label>
+        <button type="submit">نشر</button>
+        <div id="addMsg" class="err"></div>
+      </form>
+    </div>
+
+    <div class="card">
+      <h3>إدارة الأخبار</h3>
+      <div id="list"></div>
+    </div>
+  </div>
+
+  <script>
+    let csrfToken = "";
+
+    async function getCsrf() {
+      const r = await fetch("/api/csrf", { credentials: "same-origin" });
+      const d = await r.json();
+      csrfToken = d.csrfToken;
+    }
+
+    async function me() {
+      const r = await fetch("/api/admin/me", { credentials: "same-origin" });
+      if (r.status === 401) {
+        location.href = "/login.html";
+        return;
+      }
+      const d = await r.json();
+      document.getElementById("who").textContent = `مرحباً، ${d.user.username}`;
+    }
+
+    async function load() {
+      const r = await fetch("/api/admin/news", { credentials: "same-origin" });
+      if (r.status === 401) { location.href = "/login.html"; return; }
+      const d = await r.json();
+
+      const list = document.getElementById("list");
+      list.innerHTML = "";
+
+      if (!d.items || d.items.length === 0) {
+        list.innerHTML = "<p>لا توجد أخبار.</p>";
+        return;
+      }
+
+      for (const item of d.items) {
+        const wrap = document.createElement("div");
+        wrap.className = "news-item";
+        wrap.innerHTML = `
+          <h4>${escapeHtml(item.title)}</h4>
+          <div class="meta">${new Date(item.createdAt).toLocaleString("ar-EG")}</div>
+          <p>${escapeHtml(item.body).replaceAll("\n","<br>")}</p>
+          <button data-id="${item.id}" class="danger">حذف</button>
+        `;
+        wrap.querySelector("button").addEventListener("click", async () => {
+          await del(item.id);
+        });
+        list.appendChild(wrap);
+      }
+    }
+
+    async function del(id) {
+      const r = await fetch(`/api/admin/news/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+        headers: { "x-csrf-token": csrfToken },
+        credentials: "same-origin"
+      });
+      if (!r.ok) {
+        alert("فشل الحذف (تأكد من CSRF / الصلاحيات).");
+        await getCsrf();
+        return;
+      }
+      await load();
+    }
+
+    document.getElementById("addForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById("addMsg");
+      msg.textContent = "";
+
+      const fd = new FormData(e.target);
+      const payload = {
+        title: fd.get("title"),
+        body: fd.get("body")
+      };
+
+      const r = await fetch("/api/admin/news", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-csrf-token": csrfToken
+        },
+        credentials: "same-origin",
+        body: JSON.stringify(payload)
+      });
+
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        msg.textContent = d.error || "فشل النشر";
+        await getCsrf();
+        return;
+      }
+
+      e.target.reset();
+      await load();
+    });
+
+    document.getElementById("logout").addEventListener("click", async () => {
+      const r = await fetch("/api/logout", {
+        method: "POST",
+        headers: { "x-csrf-token": csrfToken },
+        credentials: "same-origin"
+      });
+      if (r.ok) location.href = "/login.html";
+      else alert("فشل تسجيل الخروج");
+    });
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"
+      }[c]));
+    }
+
+    (async function init() {
+      await getCsrf();
+      await me();
+      await load();
+    })();
+  </script>
+</body>
+</html>

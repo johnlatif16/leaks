@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>تسجيل دخول الأدمن</title>
+  <style>
+    body { font-family: system-ui, Arial; margin: 24px; max-width: 520px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 16px; }
+    label { display:block; margin-top: 10px; }
+    input { width: 100%; padding: 10px; margin-top: 6px; }
+    button { margin-top: 14px; padding: 10px 14px; cursor:pointer; }
+    .err { color: #b00020; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <h1>تسجيل دخول الأدمن</h1>
+
+  <div class="card">
+    <form id="form">
+      <label>اسم المستخدم
+        <input name="username" autocomplete="username" required />
+      </label>
+
+      <label>كلمة المرور
+        <input type="password" name="password" autocomplete="current-password" required />
+      </label>
+
+      <button type="submit">دخول</button>
+      <div id="msg" class="err"></div>
+    </form>
+  </div>
+
+  <script>
+    let csrfToken = "";
+
+    async function getCsrf() {
+      const r = await fetch("/api/csrf", { credentials: "same-origin" });
+      const d = await r.json();
+      csrfToken = d.csrfToken;
+    }
+
+    document.getElementById("form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById("msg");
+      msg.textContent = "";
+
+      const fd = new FormData(e.target);
+      const payload = {
+        username: fd.get("username"),
+        password: fd.get("password")
+      };
+
+      const r = await fetch("/api/login", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-csrf-token": csrfToken
+        },
+        credentials: "same-origin",
+        body: JSON.stringify(payload)
+      });
+
+      const d = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        msg.textContent = d.error || "فشل تسجيل الدخول";
+        await getCsrf(); // جدّد التوكن عند الفشل
+        return;
+      }
+
+      location.href = "/dashboard.html";
+    });
+
+    getCsrf();
+  </script>
+</body>
+</html>

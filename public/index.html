@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>موقع الأخبار</title>
+  <style>
+    body { font-family: system-ui, Arial; margin: 24px; }
+    header { display:flex; justify-content:space-between; align-items:center; gap:12px; }
+    .card { border: 1px solid #ddd; border-radius: 12px; padding: 14px; margin: 12px 0; }
+    .meta { color:#666; font-size: 13px; }
+    a { text-decoration:none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>الأخبار</h1>
+    <nav>
+      <a href="/login.html">تسجيل دخول الأدمن</a>
+    </nav>
+  </header>
+
+  <div id="list"></div>
+
+  <script>
+    async function loadNews() {
+      const res = await fetch("/api/news");
+      const data = await res.json();
+      const list = document.getElementById("list");
+      list.innerHTML = "";
+
+      if (!data.items || data.items.length === 0) {
+        list.innerHTML = "<p>لا توجد أخبار بعد.</p>";
+        return;
+      }
+
+      for (const item of data.items) {
+        const el = document.createElement("div");
+        el.className = "card";
+        el.innerHTML = `
+          <h3>${escapeHtml(item.title)}</h3>
+          <p class="meta">${new Date(item.createdAt).toLocaleString("ar-EG")}</p>
+          <p>${escapeHtml(item.body).replaceAll("\n","<br>")}</p>
+        `;
+        list.appendChild(el);
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#039;"
+      }[c]));
+    }
+
+    loadNews();
+  </script>
+</body>
+</html>
